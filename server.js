@@ -1,36 +1,61 @@
-import express from 'express';
-import Anthropic from '@anthropic-ai/sdk';
-import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
+const express = require('express');
+const path = require('path');
+const cors = require('cors');
+require('dotenv').config();
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
-app.use(express.json({ limit: '50kb' }));
-app.use(express.static(join(__dirname, 'public')));
 
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+// Middleware
+app.use(cors());
+app.use(express.json());
 
-app.post('/api/chat', async (req, res) => {
-  const { messages } = req.body;
-  if (!messages?.length) return res.status(400).json({ error: 'No messages' });
+// Servir archivos estáticos (frontend)
+app.use(express.static(__dirname));
 
+// Ruta principal (para evitar "Cannot GET /")
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'index.html'));
+});
+
+// Ruta del chat (IA)
+app.post('/chat', async (req, res) => {
   try {
-    const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 1024,
-      system: `Eres Flujo, un asesor financiero personal experto y empático para usuarios en Panamá. 
-Analizas los datos financieros reales del usuario y das recomendaciones personalizadas, concretas y accionables usando sus números reales.
-Responde en español, de forma conversacional pero profesional. Usa saltos de línea para facilitar la lectura.
-Cuando hay datos suficientes, incluye cifras concretas. Sé directo, útil y motivador. Máximo 300 palabras.
-Cuando analices tarjetas de crédito, menciona siempre el impacto real del interés y si conviene pagar más del mínimo.`,
-      messages: messages.slice(-10)
+    const { message } = req.body;
+
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': process.env.ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01'
+      },
+      body: JSON.stringify({
+        model: 'claude-3-haiku-20240307',
+        max_tokens: 300,
+        messages: [
+          {
+            role: 'user',
+            content: message
+          }
+        ]
+      })
     });
-    res.json({ content: response.content[0].text });
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: 'Error al contactar la IA' });
+
+    const data = await response.json();
+
+    const reply = data.content?.[0]?.text || "No hubo respuesta.";
+
+    res.json({ reply });
+
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Error en el servidor' });
   }
 });
 
+// Puerto dinámico (Railway)
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Flujo corriendo en http://localhost:${PORT}`));
+
+app.listen(PORT, () => {
+  console.log(`Servidor corriendo en puerto ${PORT}`);
+});
