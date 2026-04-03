@@ -625,22 +625,44 @@ function getCtx(){
 
 async function askAI(question){
   sw('ia');
-  const chat=document.getElementById('chat-msgs');
-  chat.innerHTML+=`<div class="msg u">${question}</div>`;
-  chat.innerHTML+=`<div class="msg a" id="ai-load"><div class="typing"><span></span><span></span><span></span></div></div>`;
-  chat.scrollTop=chat.scrollHeight;
-  const ctx=getCtx();
-  aiHist.push({role:'user',content:ctx+'\n\nPregunta: '+question});
-  try{
-    const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:aiHist.slice(-10)})});
-    const data=await res.json();
-    if(data.error)throw new Error(data.error);
-    aiHist.push({role:'assistant',content:data.content});
-    document.getElementById('ai-load').outerHTML=`<div class="msg a">${data.content.replace(/\n/g,'<br>')}</div>`;
-  }catch(e){
-    document.getElementById('ai-load').outerHTML=`<div class="msg a">Error al conectar con la IA: ${e.message}. Verifica que el servidor esté corriendo.</div>`;
+
+  const chat = document.getElementById('chat-msgs');
+
+  chat.innerHTML += `<div class="msg u">${question}</div>`;
+  chat.innerHTML += `
+    <div class="msg a" id="ai-load">
+      <div class="typing"><span></span><span></span><span></span></div>
+    </div>
+  `;
+
+  chat.scrollTop = chat.scrollHeight;
+
+  try {
+    const res = await fetch('/chat', {  // 🔥 CAMBIO AQUÍ
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        message: String(question) // 🔥 FIX DEL ERROR
+      })
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      throw new Error(data.error || "Error del servidor");
+    }
+
+    document.getElementById('ai-load').outerHTML =
+      `<div class="msg a">${data.reply.replace(/\n/g,'<br>')}</div>`;
+
+  } catch (e) {
+    document.getElementById('ai-load').outerHTML =
+      `<div class="msg a">❌ Error al conectar con la IA: ${e.message}</div>`;
   }
-  chat.scrollTop=chat.scrollHeight;
+
+  chat.scrollTop = chat.scrollHeight;
 }
 
 function sendMsg(){
