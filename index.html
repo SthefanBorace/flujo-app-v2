@@ -166,7 +166,7 @@ input:focus,select:focus{border-color:var(--ink-2);background:var(--paper)}
   <div class="ph"><div class="pt">Tu panorama financiero</div><div class="ps" id="dash-date"></div></div>
   <div class="mrow">
     <div class="mc gi"><div class="ml">Ingresos</div><div class="mv g" id="mi">$0.00</div><div class="ms" id="mic">0 entradas</div></div>
-    <div class="mc ex"><div class="ml">Gastos totales</div><div class="mv r" id="me">$0.00</div><div class="ms" id="mec">incluye pagos CC</div></div>
+    <div class="mc ex"><div class="ml">Gastos reales</div><div class="mv r" id="me">$0.00</div><div class="ms" id="mec">sin cargos CC pendientes</div></div>
     <div class="mc ba"><div class="ml">Balance</div><div class="mv b" id="mb">$0.00</div><div class="ms" id="msr">Ahorro: 0%</div></div>
   </div>
   <div class="mrow" id="cc-dash" style="display:none"></div>
@@ -547,7 +547,9 @@ function upCards() {
 
 function upDash() {
   const ti=db.i.reduce((s,x)=>s+x.a,0);
-  const te=db.e.reduce((s,x)=>s+x.a,0);
+  // Solo cuentan como gasto real: gastos sin tarjeta + pagos a tarjeta
+  // Los cargos CC (isPay:false con ccId) NO bajan el balance — solo aumentan la deuda
+  const te=db.e.filter(e=>!(e.ccId&&!e.isPay)).reduce((s,x)=>s+x.a,0);
   const bal=ti-te, sr=ti>0?((bal/ti)*100).toFixed(1):0;
   document.getElementById('mi').textContent=fmt(ti);
   document.getElementById('me').textContent=fmt(te);
@@ -555,9 +557,10 @@ function upDash() {
   document.getElementById('mb').className='mv '+(bal>=0?'b':'r');
   document.getElementById('mic').textContent=db.i.length+' entrada'+(db.i.length!==1?'s':'');
   document.getElementById('msr').textContent='Ahorro: '+sr+'%';
+  const ccCharges=db.e.filter(e=>e.ccId&&!e.isPay).length;
   const ccPays=db.e.filter(e=>e.isPay).length;
-  const normalExp=db.e.length-ccPays;
-  document.getElementById('mec').textContent=normalExp+' gasto'+(normalExp!==1?'s':'')+(ccPays?` · ${ccPays} pago${ccPays!==1?'s':''} CC`:'');
+  const normalExp=db.e.length-ccCharges-ccPays;
+  document.getElementById('mec').textContent=normalExp+' gasto'+(normalExp!==1?'s':'')+(ccCharges?` · ${ccCharges} cargo${ccCharges!==1?'s':''} CC`:'')+(ccPays?` · ${ccPays} pago${ccPays!==1?'s':''} CC`:'');
   const ccd=document.getElementById('cc-dash');
   if(db.cards.length){
     ccd.style.display='grid';
@@ -589,17 +592,19 @@ function upCharts() {
 }
 
 function getCtx() {
-  const ti=db.i.reduce((s,x)=>s+x.a,0), te=db.e.reduce((s,x)=>s+x.a,0);
+  const ti=db.i.reduce((s,x)=>s+x.a,0);
+  const te=db.e.filter(e=>!(e.ccId&&!e.isPay)).reduce((s,x)=>s+x.a,0);
+  const totalCCCharges=db.e.filter(e=>e.ccId&&!e.isPay).reduce((s,e)=>s+e.a,0);
   const bal=ti-te, sr=ti>0?((bal/ti)*100).toFixed(1):0;
   const mm={},cm={};
-  db.e.forEach(e=>{mm[e.m]=(mm[e.m]||0)+e.a;cm[e.cat]=(cm[e.cat]||0)+e.a;});
+  db.e.filter(e=>!(e.ccId&&!e.isPay)).forEach(e=>{mm[e.m]=(mm[e.m]||0)+e.a;cm[e.cat]=(cm[e.cat]||0)+e.a;});
   const cards=db.cards.map(c=>{
     const p=getProj(c.id);
     const charges=db.e.filter(e=>e.ccId===c.id&&!e.isPay).reduce((s,e)=>s+e.a,0);
     const paid=db.e.filter(e=>e.ccId===c.id&&e.isPay).reduce((s,e)=>s+e.a,0);
     return{nombre:c.name,TEA:c.rate+'%',mensual:(c.rate/12).toFixed(2)+'%',saldoAnterior:c.prev,cargosDelPeriodo:charges,pagosRealizados:paid,deudaActual:p.debt,interesEstimado:p.interest,totalAlCorte:p.total,pagoMinimo:p.minPay,fechaCorte:p.cutDate,fechaPago:p.payDate,limiteCredito:c.limit};
   });
-  return `[FLUJO v3 — DATOS EN TIEMPO REAL]\nIngresos: $${ti.toFixed(2)}\nGastos totales (incluye pagos CC): $${te.toFixed(2)}\nBalance: $${bal.toFixed(2)} | Ahorro: ${sr}%\nPor método: ${JSON.stringify(mm)}\nPor categoría: ${JSON.stringify(cm)}\nTarjetas: ${JSON.stringify(cards)}\nIngresos: ${JSON.stringify(db.i.map(x=>({desc:x.d,monto:x.a,método:x.m,cat:x.cat,fecha:x.fe})))}\nGastos: ${JSON.stringify(db.e.slice(-40).map(x=>({desc:x.d,monto:x.a,método:x.m,cat:x.cat,fecha:x.fe,tarjeta:x.ccName||null,esPago:x.isPay||false})))}`;
+  return `[FLUJO v3 — DATOS EN TIEMPO REAL]\nNOTA: Los cargos CC no reducen el balance hasta que se pagan.\nIngresos: $${ti.toFixed(2)}\nGastos reales del bolsillo (sin cargos CC): $${te.toFixed(2)}\nCargos pendientes en tarjetas: $${totalCCCharges.toFixed(2)}\nBalance real disponible: $${bal.toFixed(2)} | Ahorro: ${sr}%\nPor método (gastos reales): ${JSON.stringify(mm)}\nPor categoría (gastos reales): ${JSON.stringify(cm)}\nTarjetas: ${JSON.stringify(cards)}\nIngresos: ${JSON.stringify(db.i.map(x=>({desc:x.d,monto:x.a,método:x.m,cat:x.cat,fecha:x.fe})))}\nTodos los movimientos: ${JSON.stringify(db.e.slice(-40).map(x=>({desc:x.d,monto:x.a,método:x.m,cat:x.cat,fecha:x.fe,tarjeta:x.ccName||null,esPago:x.isPay||false,esCargo:!!(x.ccId&&!x.isPay)})))}`;
 }
 
 async function askAI(question) {
